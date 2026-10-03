@@ -1,5 +1,18 @@
-import os
+"""Run a prompt on a split of the golden set. One row per item, always.
+
+Usage (from the repo root):
+    python harness/runner.py --prompt prompts/classifier_v2.txt --split dev
+    python harness/runner.py --prompt prompts/classifier_v2.txt --split test
+    python harness/runner.py --prompt prompts/classifier_v2.txt --split dev --dry-run   # no API call
+
+Output: results/<prompt name>_<split>.jsonl  (one row per item)
+Re-running resumes: items that already have a successful row are skipped,
+items that failed are retried.
+"""
+import argparse
 import json
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -7,862 +20,183 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from schema import CLASSIFIER_SCHEMA, LABELS  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-load_dotenv(BASE_DIR / ".env")
-
-API_KEY = os.getenv("GROQ_API_KEY")
-
-MODEL = os.getenv(
-    "GROQ_MODEL",
-    "openai/gpt-oss-20b"
+DATA_FILE = BASE_DIR / "data" / "instagram_labels_split_140_dev_60_test.xlsx"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
+SYSTEM_MESSAGE = (
+    "You are an Instagram comment classification system. Follow the "
+    "classification instructions exactly. Return only a json object "
+    "containing the label and reason."
 )
-
-DATA_FILE = (
-    BASE_DIR
-    / "data"
-    / "instagram_labels_split_140_dev_60_test.xlsx"
-)
-
-PROMPT_FILE = (
-    BASE_DIR
-    / "prompts"
-    / "classifier_v2.txt"
-)
-
-RESULTS_DIR = BASE_DIR / "results"
-
-OUTPUT_FILE = (
-    RESULTS_DIR
-    / "classifier_v2_dev.jsonl"
-)
-
-SHEET_NAME = "dev_set"
-
-# None = process all 140 development comments
-TEST_LIMIT = None
-
-API_URL = (
-    "https://api.groq.com/openai/v1/chat/completions"
-)
-
-ALLOWED_LABELS = {
-    "Positive",
-    "Humour",
-    "Hate Speech"
-}
-
-# Retry settings
-MAX_RETRIES = 8
-
-# Wait between normal successful requests
-DELAY_BETWEEN_REQUESTS = 3
+MAX_RETRIES = 6
 
 
-# ============================================================
-# CHECK CONFIGURATION
-# ============================================================
-
-if not API_KEY:
-    raise SystemExit(
-        "ERROR: GROQ_API_KEY was not found in .env"
-    )
-
-if not DATA_FILE.exists():
-    raise SystemExit(
-        f"ERROR: Dataset not found:\n{DATA_FILE}"
-    )
-
-if not PROMPT_FILE.exists():
-    raise SystemExit(
-        f"ERROR: Prompt not found:\n{PROMPT_FILE}"
-    )
-
-RESULTS_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+def build_prompt(template: str, comment: str) -> str:
+    if "{{COMMENT}}" in template:
+        return template.replace("{{COMMENT}}", comment.strip())
+    return template.rstrip() + "\n\nComment:\n" + comment.strip()
 
 
-# ============================================================
-# LOAD PROMPT
-# ============================================================
-
-with open(
-    PROMPT_FILE,
-    "r",
-    encoding="utf-8"
-) as file:
-
-    prompt_template = file.read()
-
-
-# ============================================================
-# LOAD DATASET
-# ============================================================
-
-print("Loading dataset...")
-
-df = pd.read_excel(
-    DATA_FILE,
-    sheet_name=SHEET_NAME
-)
-
-print(
-    f"Loaded {len(df)} development comments."
-)
-
-
-# ============================================================
-# CHECK DATASET COLUMNS
-# ============================================================
-
-required_columns = [
-    "item_id",
-    "comment_text",
-    "final_label"
-]
-
-missing_columns = [
-    column
-    for column in required_columns
-    if column not in df.columns
-]
-
-if missing_columns:
-
-    raise SystemExit(
-        "ERROR: Missing columns:\n"
-        + "\n".join(missing_columns)
-    )
-
-
-# ============================================================
-# LIMIT DATASET
-# ============================================================
-
-if TEST_LIMIT is not None:
-
-    df = df.head(TEST_LIMIT)
-
-print(
-    f"Running classifier on {len(df)} comments."
-)
-
-
-# ============================================================
-# LOAD PREVIOUS RESULTS
-# ============================================================
-
-processed_ids = set()
-
-if OUTPUT_FILE.exists():
-
-    with open(
-        OUTPUT_FILE,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        for line in file:
-
-            line = line.strip()
-
-            if not line:
-                continue
-
-            try:
-
-                result = json.loads(line)
-
-                item_id = result.get(
-                    "item_id"
-                )
-
-                predicted_label = result.get(
-                    "predicted_label"
-                )
-
-                # Only count an item as processed if
-                # it contains a valid classification.
-                if (
-                    item_id
-                    and predicted_label
-                    in ALLOWED_LABELS
-                ):
-
-                    processed_ids.add(
-                        str(item_id)
-                    )
-
-            except json.JSONDecodeError:
-
-                # Ignore malformed old lines
-                continue
-
-
-print(
-    f"Already processed: {len(processed_ids)}"
-)
-
-
-# ============================================================
-# CLASSIFY ONE COMMENT
-# ============================================================
-
-def classify_comment(comment):
-
-    # --------------------------------------------------------
-    # Build prompt
-    # --------------------------------------------------------
-
-    prompt = prompt_template.replace(
-        "{{COMMENT}}",
-        ""
-    ).strip()
-
-    prompt = (
-        prompt
-        + "\n\n"
-        + "COMMENT TO CLASSIFY:\n"
-        + comment
-        + "\n\n"
-        + "END OF COMMENT"
-    )
-
-    # --------------------------------------------------------
-    # API payload
-    # --------------------------------------------------------
-
+def call_model(api_key, model, prompt):
+    """Return (label, reason, usage). Raises RuntimeError after all retries."""
     payload = {
-
-        "model": MODEL,
-
-        "messages": [
-
-            {
-                "role": "system",
-                "content": (
-                    "You are an Instagram comment "
-                    "classification system. "
-                    "Follow the classification "
-                    "instructions exactly. "
-                    "Return only a json object containing "
-                    "the label and reason."
-                )
-            },
-
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-
+        "model": model,
         "temperature": 0,
-
-        # Do not return the model's reasoning
         "include_reasoning": False,
-
-        # Strict structured output
+        "messages": [
+            {"role": "system", "content": SYSTEM_MESSAGE},
+            {"role": "user", "content": prompt},
+        ],
         "response_format": {
-
             "type": "json_schema",
-
             "json_schema": {
-
-                "name": (
-                    "instagram_comment_classification"
-                ),
-
+                "name": "instagram_comment_classification",
                 "strict": True,
-
-                "schema": {
-
-                    "type": "object",
-
-                    "properties": {
-
-                        "label": {
-                            "type": "string",
-                            "enum": [
-                                "Positive",
-                                "Humour",
-                                "Hate Speech"
-                            ]
-                        },
-
-                        "reason": {
-                            "type": "string"
-                        }
-                    },
-
-                    "required": [
-                        "label",
-                        "reason"
-                    ],
-
-                    "additionalProperties": False
-                }
-            }
-        }
+                "schema": CLASSIFIER_SCHEMA,
+            },
+        },
     }
-
-    headers = {
-        "Authorization": (
-            f"Bearer {API_KEY}"
-        ),
-        "Content-Type": "application/json"
-    }
-
-    # --------------------------------------------------------
-    # RETRY LOOP
-    # --------------------------------------------------------
-
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    last_error = "unknown error"
     for attempt in range(MAX_RETRIES):
-
-        start_time = time.perf_counter()
-
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            json=payload,
-            timeout=90
-        )
-
-        latency_ms = (
-            time.perf_counter()
-            - start_time
-        ) * 1000
-
-        # ====================================================
-        # SUCCESS
-        # ====================================================
-
-        if response.ok:
-
-            data = response.json()
-
-            break
-
-        # ====================================================
-        # 429 RATE LIMIT
-        # ====================================================
-
-        if response.status_code == 429:
-
-            try:
-
-                error_data = response.json()
-
-                error = error_data.get(
-                    "error",
-                    {}
-                )
-
-                error_message = error.get(
-                    "message",
-                    ""
-                )
-
-            except Exception:
-
-                error_message = response.text
-
-            # 5, 10, 20, 40, 60, 60, 60, 60 seconds
-            wait_seconds = min(
-                5 * (2 ** attempt),
-                60
-            )
-
-            print()
-            print(
-                "RATE LIMIT REACHED"
-            )
-
-            print(
-                f"Waiting {wait_seconds} seconds "
-                f"before retry "
-                f"{attempt + 1}/{MAX_RETRIES}..."
-            )
-
-            print(
-                f"Groq: {error_message}"
-            )
-
-            time.sleep(
-                wait_seconds
-            )
-
-            continue
-
-        # ====================================================
-        # 400 JSON VALIDATION ERROR
-        # ====================================================
-
-        if response.status_code == 400:
-
-            try:
-
-                error_data = response.json()
-
-                error = error_data.get(
-                    "error",
-                    {}
-                )
-
-                error_code = error.get(
-                    "code",
-                    ""
-                )
-
-                error_message = error.get(
-                    "message",
-                    ""
-                )
-
-                failed_generation = error.get(
-                    "failed_generation",
-                    ""
-                )
-
-            except Exception:
-
-                error_code = ""
-                error_message = response.text
-                failed_generation = ""
-
-            if error_code == "json_validate_failed":
-
-                # Short retry delay because this is
-                # usually an occasional generation failure.
-                wait_seconds = min(
-                    2 + attempt,
-                    10
-                )
-
-                print()
-                print(
-                    "JSON VALIDATION FAILED"
-                )
-
-                print(
-                    f"Retrying in {wait_seconds} seconds "
-                    f"({attempt + 1}/{MAX_RETRIES})..."
-                )
-
-                if failed_generation:
-                    print(
-                        f"Failed generation: "
-                        f"{failed_generation[:200]}"
-                    )
-
-                time.sleep(
-                    wait_seconds
-                )
-
-                continue
-
-            # Another type of 400 is a real API/request error.
-            raise RuntimeError(
-                f"Groq API error 400: "
-                f"{error_message}"
-            )
-
-        # ====================================================
-        # OTHER API ERROR
-        # ====================================================
-
-        raise RuntimeError(
-            f"Groq API error "
-            f"{response.status_code}: "
-            f"{response.text}"
-        )
-
-    else:
-
-        raise RuntimeError(
-            "Request failed after "
-            f"{MAX_RETRIES} retries."
-        )
-
-    # ========================================================
-    # EXTRACT MESSAGE
-    # ========================================================
-
-    try:
-
-        message = data[
-            "choices"
-        ][0][
-            "message"
-        ]
-
-    except (
-        KeyError,
-        IndexError,
-        TypeError
-    ):
-
-        raise RuntimeError(
-            "Unexpected Groq response:\n"
-            + json.dumps(
-                data,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
-
-    content = message.get(
-        "content"
-    )
-
-    if not content:
-
-        raise RuntimeError(
-            "Groq returned empty content:\n"
-            + json.dumps(
-                data,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
-
-    # ========================================================
-    # PARSE JSON
-    # ========================================================
-
-    try:
-
-        prediction = json.loads(
-            content
-        )
-
-    except json.JSONDecodeError:
-
-        raise RuntimeError(
-            "Model returned invalid JSON:\n"
-            + content
-        )
-
-    # ========================================================
-    # VALIDATE PREDICTION
-    # ========================================================
-
-    predicted_label = prediction.get(
-        "label"
-    )
-
-    reason = prediction.get(
-        "reason"
-    )
-
-    if predicted_label not in ALLOWED_LABELS:
-
-        raise RuntimeError(
-            "Invalid label returned: "
-            f"{predicted_label}"
-        )
-
-    if not isinstance(
-        reason,
-        str
-    ):
-
-        raise RuntimeError(
-            "Invalid reason returned."
-        )
-
-    return (
-        prediction,
-        data,
-        latency_ms
-    )
-
-
-# ============================================================
-# MAIN CLASSIFICATION LOOP
-# ============================================================
-
-print()
-print("=" * 60)
-print("STARTING CLASSIFICATION")
-print("=" * 60)
-print()
-
-
-processed_this_run = 0
-skipped_this_run = 0
-failed_this_run = 0
-
-
-# Append mode is important:
-# it preserves the 139 results you already have.
-
-with open(
-    OUTPUT_FILE,
-    "a",
-    encoding="utf-8"
-) as output_file:
-
-    for position, (_, row) in enumerate(
-        df.iterrows(),
-        start=1
-    ):
-
-        # ----------------------------------------------------
-        # Get data
-        # ----------------------------------------------------
-
-        item_id = str(
-            row["item_id"]
-        ).strip()
-
-        comment = str(
-            row["comment_text"]
-        ).strip()
-
-        gold_label = str(
-            row["final_label"]
-        ).strip()
-
-        # ----------------------------------------------------
-        # Skip already completed items
-        # ----------------------------------------------------
-
-        if item_id in processed_ids:
-
-            print(
-                f"[{position}/{len(df)}] "
-                f"{item_id} already processed."
-            )
-
-            skipped_this_run += 1
-
-            continue
-
-        # ----------------------------------------------------
-        # Display item
-        # ----------------------------------------------------
-
-        print(
-            f"[{position}/{len(df)}] "
-            f"Processing {item_id}..."
-        )
-
-        print(
-            f"Comment: {comment[:120]}"
-        )
-
-        # ----------------------------------------------------
-        # CLASSIFY
-        # ----------------------------------------------------
-
         try:
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                content = json.loads(data["choices"][0]["message"]["content"])
+                if content.get("label") not in LABELS:
+                    raise ValueError(f"bad label: {content.get('label')!r}")
+                return content["label"], content.get("reason", ""), data.get("usage", {})
+            last_error = f"HTTP {r.status_code}: {r.text[:200]}"
+            # json_validate_failed = the model returned an empty/invalid answer: random, retry it
+            flaky = r.status_code == 400 and "json_validate_failed" in r.text
+            if r.status_code not in (429, 500, 502, 503, 504) and not flaky:
+                break  # not worth retrying (bad key, truly bad request, ...)
+            wait = 1 if flaky else float(r.headers.get("retry-after", 2 ** attempt))
+        except (requests.RequestException, ValueError, KeyError, json.JSONDecodeError) as e:
+            last_error = f"{type(e).__name__}: {e}"
+            wait = 2 ** attempt
+        time.sleep(min(wait, 60))
+    raise RuntimeError(last_error)
 
-            (
-                prediction,
-                raw_response,
-                latency_ms
-            ) = classify_comment(
-                comment
-            )
 
-            predicted_label = (
-                prediction["label"]
-            )
+def load_done(path: Path) -> dict:
+    """Rows already written, keyed by item_id (last row wins)."""
+    done = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                done[row["item_id"]] = row
+    return done
 
-            reason = (
-                prediction["reason"]
-            )
 
-            # ------------------------------------------------
-            # Compare with gold label
-            # ------------------------------------------------
+def summarize(rows):
+    n = len(rows)
+    ok = [r for r in rows if r["error"] is None]
+    correct = sum(r["correct"] is True for r in ok)
+    print(f"\nItems: {n} | answered: {len(ok)} | failed: {n - len(ok)}")
+    print(f"Correct: {correct}/{n} ({100 * correct / n:.1f}%)  (failed items count as wrong)")
+    for lab in LABELS:
+        sub = [r for r in rows if r["gold_label"] == lab]
+        c = sum(r["correct"] is True for r in sub)
+        print(f"  gold {lab:<12} {c}/{len(sub)}")
+    tokens = sum((r.get("total_tokens") or 0) for r in ok)
+    print(f"Total tokens: {tokens}")
 
-            correct = (
-                predicted_label
-                == gold_label
-            )
 
-            # ------------------------------------------------
-            # Token information
-            # ------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--prompt", required=True, help="path to prompt file, e.g. prompts/classifier_v2.txt")
+    ap.add_argument("--split", choices=["dev", "test"], default="dev")
+    ap.add_argument("--model", default=None, help="default: $GROQ_MODEL or openai/gpt-oss-20b")
+    ap.add_argument("--limit", type=int, default=None, help="only the first N items (for quick tests)")
+    ap.add_argument("--delay", type=float, default=2.0, help="seconds between requests")
+    ap.add_argument("--dry-run", action="store_true", help="no API call; fake predictions to test the pipeline")
+    args = ap.parse_args()
 
-            usage = raw_response.get(
-                "usage",
-                {}
-            )
+    load_dotenv(BASE_DIR / ".env")
+    api_key = os.getenv("GROQ_API_KEY")
+    model = args.model or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    if not api_key and not args.dry_run:
+        sys.exit("ERROR: GROQ_API_KEY not found in .env (or use --dry-run)")
 
-            prompt_tokens = usage.get(
-                "prompt_tokens"
-            )
+    prompt_path = Path(args.prompt)
+    if not prompt_path.is_absolute():
+        prompt_path = BASE_DIR / prompt_path
+    template = prompt_path.read_text(encoding="utf-8")
+    if not template.strip():
+        sys.exit(f"ERROR: prompt file is empty: {prompt_path}")
+    version = prompt_path.stem
 
-            completion_tokens = usage.get(
-                "completion_tokens"
-            )
+    df = pd.read_excel(DATA_FILE, sheet_name=f"{args.split}_set")
+    missing = {"item_id", "comment_text", "final_label"} - set(df.columns)
+    if missing:
+        sys.exit(f"ERROR: missing columns: {missing}")
+    if args.limit:
+        df = df.head(args.limit)
 
-            total_tokens = usage.get(
-                "total_tokens"
-            )
+    out = BASE_DIR / "results" / f"{version}_{args.split}{'_dryrun' if args.dry_run else ''}.jsonl"
+    out.parent.mkdir(exist_ok=True)
+    done = load_done(out)
+    print(f"{len(df)} items | prompt={version} | split={args.split} | model={model}")
+    print(f"Already done (kept): {sum(r['error'] is None for r in done.values())}")
 
-            # ------------------------------------------------
-            # Build result
-            # ------------------------------------------------
-
-            result = {
-
-                "item_id": item_id,
-
-                "comment_text": comment,
-
-                "gold_label": gold_label,
-
-                "predicted_label": predicted_label,
-
-                "reason": reason,
-
-                "correct": correct,
-
-                "latency_ms": round(
-                    latency_ms,
-                    2
-                ),
-
-                "model": MODEL,
-
-                "prompt_version": "v2",
-
-                "prompt_tokens": (
-                    prompt_tokens
-                ),
-
-                "completion_tokens": (
-                    completion_tokens
-                ),
-
-                "total_tokens": (
-                    total_tokens
+    rows = []
+    for i, item in enumerate(df.itertuples(index=False), 1):
+        prev = done.get(item.item_id)
+        if prev and prev["error"] is None:
+            rows.append(prev)
+            continue
+        row = {
+            "item_id": item.item_id,
+            "comment_text": item.comment_text,
+            "gold_label": item.final_label,
+            "predicted_label": None,
+            "reason": None,
+            "correct": False,
+            "error": None,
+            "latency_ms": None,
+            "model": model,
+            "prompt_version": version,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+        t0 = time.perf_counter()
+        try:
+            if args.dry_run:
+                label, reason, usage = "Positive", "dry run", {}
+            else:
+                label, reason, usage = call_model(
+                    api_key, model, build_prompt(template, str(item.comment_text))
                 )
-            }
-
-            # ------------------------------------------------
-            # Save immediately
-            # ------------------------------------------------
-
-            output_file.write(
-                json.dumps(
-                    result,
-                    ensure_ascii=False
-                )
-                + "\n"
+            row.update(
+                predicted_label=label,
+                reason=reason,
+                correct=(label == item.final_label),
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                total_tokens=usage.get("total_tokens"),
             )
+        except RuntimeError as e:
+            row["error"] = str(e)  # failed items still get a row
+            print(f"  [{i}] {item.item_id} FAILED: {e}")
+        row["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        rows.append(row)
+        done[item.item_id] = row
+        # rewrite the file after every item so a crash never loses work
+        out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+        if not args.dry_run:
+            time.sleep(args.delay)
 
-            output_file.flush()
-
-            processed_ids.add(
-                item_id
-            )
-
-            processed_this_run += 1
-
-            # ------------------------------------------------
-            # Display result
-            # ------------------------------------------------
-
-            print(
-                f"Prediction: {predicted_label}"
-            )
-
-            print(
-                f"Gold:       {gold_label}"
-            )
-
-            print(
-                f"Correct:    {correct}"
-            )
-
-            print(
-                f"Reason:     {reason}"
-            )
-
-            print(
-                f"Latency:    {latency_ms:.0f} ms"
-            )
-
-            print()
-
-            # ------------------------------------------------
-            # Slow down normal requests
-            # ------------------------------------------------
-
-            time.sleep(
-                DELAY_BETWEEN_REQUESTS
-            )
-
-        # ----------------------------------------------------
-        # FAILURE
-        # ----------------------------------------------------
-
-        except Exception as error:
-
-            failed_this_run += 1
-
-            print()
-            print(
-                f"ERROR processing {item_id}:"
-            )
-
-            print(
-                str(error)
-            )
-
-            print(
-                "Skipping this item and continuing..."
-            )
-
-            print()
+    out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    print(f"Saved: {out}")
+    summarize(rows)
 
 
-# ============================================================
-# FINAL SUMMARY
-# ============================================================
-
-print()
-print("=" * 60)
-print("CLASSIFICATION FINISHED")
-print("=" * 60)
-
-print(
-    f"Processed this run: "
-    f"{processed_this_run}"
-)
-
-print(
-    f"Skipped previously processed: "
-    f"{skipped_this_run}"
-)
-
-print(
-    f"Failed this run: "
-    f"{failed_this_run}"
-)
-
-print(
-    f"Total valid results in file: "
-    f"{len(processed_ids)}"
-)
-
-print(
-    "Results saved to:"
-)
-
-print(
-    OUTPUT_FILE
-)
-
-print("=" * 60)
+if __name__ == "__main__":
+    main()

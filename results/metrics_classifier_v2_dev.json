@@ -1,0 +1,73 @@
+{
+  "items": 140,
+  "answered": 139,
+  "failed": 1,
+  "failed_ids": [
+    "POOL0574"
+  ],
+  "correct": 72,
+  "accuracy_pct": 51.4,
+  "macro_f1": 0.485,
+  "per_label": {
+    "Positive": {
+      "gold_count": 59,
+      "correct": 41,
+      "predicted_count": 65,
+      "precision": 0.631,
+      "recall": 0.695,
+      "f1": 0.661
+    },
+    "Humour": {
+      "gold_count": 40,
+      "correct": 20,
+      "predicted_count": 58,
+      "precision": 0.345,
+      "recall": 0.5,
+      "f1": 0.408
+    },
+    "Hate Speech": {
+      "gold_count": 41,
+      "correct": 11,
+      "predicted_count": 16,
+      "precision": 0.688,
+      "recall": 0.268,
+      "f1": 0.386
+    }
+  },
+  "confusion_matrix": {
+    "Positive": {
+      "Positive": 41,
+      "Humour": 17,
+      "Hate Speech": 1,
+      "FAILED": 0
+    },
+    "Humour": {
+      "Positive": 15,
+      "Humour": 20,
+      "Hate Speech": 4,
+      "FAILED": 1
+    },
+    "Hate Speech": {
+      "Positive": 9,
+      "Humour": 21,
+      "Hate Speech": 11,
+      "FAILED": 0
+    }
+  },
+  "latency_ms": {
+    "mean": 4115.2,
+    "median": 3001.4,
+    "p95": 11133.2
+  },
+  "tokens": {
+    "prompt": 96248,
+    "completion": 57370,
+    "total": 153618
+  },
+  "cost_usd": {
+    "this_run": 0.02443,
+    "per_item": 0.0001758,
+    "per_1k_requests": 0.1758,
+    "per_100k_requests_(100x)": 17.58
+  }
+}

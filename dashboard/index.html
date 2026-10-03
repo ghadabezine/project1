@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Grader · Instagram comment classifier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF3F5; --surface:#FFFFFF; --ink:#10253A; --muted:#566878; --line:#D3DCE3;
+  --pos:#12906B; --hum:#C98500; --hate:#CC2F57; --accent:#0B7A99; --soft:#E3EBF0;
+  --pos-bg:#DDF3EA; --hum-bg:#FBEFCF; --hate-bg:#FADDE5;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --display:"Bricolage Grotesque","Noto Sans Arabic","Segoe UI",system-ui,sans-serif;
+  --text:"Newsreader","Noto Naskh Arabic",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0B1621; --surface:#112131; --ink:#E5EDF4; --muted:#93A5B5; --line:#223648; --soft:#16293A;
+    --pos:#3FCB9F; --hum:#F2B93B; --hate:#F26C8D; --accent:#4CC0DE;
+    --pos-bg:#12362C; --hum-bg:#3B2F10; --hate-bg:#40182A;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0B1621; --surface:#112131; --ink:#E5EDF4; --muted:#93A5B5; --line:#223648; --soft:#16293A;
+  --pos:#3FCB9F; --hum:#F2B93B; --hate:#F26C8D; --accent:#4CC0DE;
+  --pos-bg:#12362C; --hum-bg:#3B2F10; --hate-bg:#40182A;
+}
+html{height:100%;scroll-padding-top:calc(env(safe-area-inset-top,0px) + 64px);scroll-behavior:smooth}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--text);font-size:18px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);margin:0;line-height:1.08;letter-spacing:-.02em}
+p{margin:0 0 1em;max-width:62ch}
+a{color:var(--accent)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.ui{font-family:var(--display)}
+.muted{color:var(--muted)}
+.num{font-family:var(--display);font-variant-numeric:tabular-nums}
+
+/* nav */
+nav.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--paper) 90%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+nav.top .wrap{display:flex;align-items:center;gap:22px;height:52px;overflow-x:auto;scrollbar-width:none}
+nav.top .wrap::-webkit-scrollbar{display:none}
+nav.top b{font-family:var(--display);font-weight:800;white-space:nowrap;margin-right:6px}
+nav.top a{font-family:var(--display);font-size:15px;font-weight:600;text-decoration:none;color:var(--muted);white-space:nowrap}
+nav.top a:hover{color:var(--ink)}
+#themeBtn{margin-left:auto;background:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-family:var(--display);font-size:14px;color:var(--muted);white-space:nowrap}
+
+/* hero */
+.hero{padding:56px 0 40px;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:48px;align-items:start}
+.hero h1{font-size:clamp(34px,4.6vw,56px);font-weight:800}
+.hero .lede{font-size:21px;margin-top:22px;color:var(--muted);max-width:34ch}
+.hero .meta{margin-top:26px;font-family:var(--display);font-size:15px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.stat{font-family:var(--display);font-size:15px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.stat b{font-weight:800;font-size:17px}
+
+.feed{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 20px 14px}
+.feed header{display:flex;justify-content:space-between;align-items:baseline;padding:14px 0 10px;border-bottom:1px solid var(--line);font-family:var(--display);font-size:14px;color:var(--muted)}
+.cm{padding:16px 0;border-bottom:1px dashed var(--line)}
+.cm:last-child{border-bottom:0}
+.cm .t{font-size:19px;line-height:1.4;unicode-bidi:plaintext;overflow-wrap:anywhere}
+.verd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:9px;font-family:var(--display);font-size:13.5px}
+.tag{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 11px;font-weight:600;border:1.5px solid transparent}
+.tag.Positive{background:var(--pos-bg);color:var(--pos);border-color:var(--pos)}
+.tag.Humour{background:var(--hum-bg);color:var(--hum);border-color:var(--hum)}
+.tag.Hate{background:var(--hate-bg);color:var(--hate);border-color:var(--hate)}
+.tag.none{background:var(--soft);color:var(--muted);border-color:var(--line)}
+.verd small{font-size:12.5px;color:var(--muted)}
+.res{margin-left:auto;font-weight:600}
+.res.ok{color:var(--pos)} .res.no{color:var(--hate)}
+
+/* sections */
+section{padding:64px 0;border-top:1px solid var(--line)}
+.sec{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:48px}
+.sec > .head h2{font-size:clamp(28px,3.4vw,40px);font-weight:800}
+.sec > .head p{margin-top:14px;color:var(--muted);font-size:17px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px}
+.card h3{font-size:20px;font-weight:600;margin-bottom:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.runlay{display:grid;grid-template-columns:minmax(0,1fr);gap:30px}
+.stack{display:grid;gap:20px;min-width:0}
+.card,.sec>*{min-width:0}
+.scroll{overflow-x:auto}
+.cap{font-size:15.5px;color:var(--muted);margin:12px 0 0}
+
+/* track */
+.track{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;position:relative;margin-top:6px}
+.track .st{position:relative;padding:0 14px 0 0}
+.track .st::before{content:"";position:absolute;top:17px;left:36px;right:0;height:2px;background:var(--line)}
+.track .st:last-child::before{display:none}
+.track .dot{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:15px;border:2px solid var(--line);background:var(--surface);position:relative;z-index:1}
+.track .done .dot{background:var(--accent);border-color:var(--accent);color:#fff}
+.track .part .dot{border-color:var(--accent);color:var(--accent)}
+.track .st h4{font-size:17px;font-weight:600;margin:12px 0 4px}
+.track .st p{font-size:15px;color:var(--muted);margin:0}
+.badge{display:inline-block;font-family:var(--display);font-size:12.5px;font-weight:600;border-radius:6px;padding:1px 8px;margin-top:8px;background:var(--soft);color:var(--muted)}
+.done .badge{background:var(--pos-bg);color:var(--pos)}
+.part .badge{background:var(--hum-bg);color:var(--hum)}
+
+/* bars */
+.bar{height:16px;border-radius:8px;background:var(--soft);overflow:hidden;display:flex}
+.bar i{display:block;height:100%;width:0;transition:width .9s cubic-bezier(.2,.7,.2,1)}
+.bar i.Positive{background:var(--pos)} .bar i.Humour{background:var(--hum)} .bar i.Hate{background:var(--hate)} .bar i.acc{background:var(--accent)}
+.row{display:grid;grid-template-columns:100px 1fr 130px;gap:12px;align-items:center;margin:12px 0;font-family:var(--display);font-size:15px}
+.row .v{text-align:right;font-weight:600;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px;font-family:var(--display);font-size:13.5px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+
+/* matrix */
+table.mx{border-collapse:separate;border-spacing:5px;font-family:var(--display);width:100%;min-width:430px}
+table.mx th{font-weight:600;font-size:13.5px;color:var(--muted);padding:4px 6px;text-align:center}
+table.mx th.r{text-align:right;white-space:nowrap}
+table.mx td{padding:0}
+.cell{width:100%;min-height:58px;border:1.5px solid transparent;border-radius:10px;font-family:var(--display);font-weight:800;font-size:22px;background:var(--soft);display:grid;place-items:center}
+.cell.sel{border-color:var(--ink)}
+.cell:hover{border-color:var(--muted)}
+.read{margin-top:14px;min-height:3.2em;font-size:17px}
+.axis{font-family:var(--display);font-size:13px;color:var(--muted);margin:0 0 4px}
+
+/* tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.tabs button{border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 15px;font-family:var(--display);font-weight:600;font-size:15px}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+/* history */
+.hist{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:end;height:220px;margin-top:8px}
+.hcol{display:flex;flex-direction:column;justify-content:flex-end;height:100%;font-family:var(--display);text-align:center}
+.hbar{border-radius:10px 10px 4px 4px;background:var(--accent);height:0;transition:height .9s cubic-bezier(.2,.7,.2,1);display:grid;place-items:start center;padding-top:8px;color:#fff;font-weight:800;font-size:17px}
+.hbar.empty{background:transparent;border:2px dashed var(--line);color:var(--muted);height:70px!important;font-weight:600;font-size:13px;place-items:center;padding:0}
+.hlab{font-weight:600;font-size:15px;margin-top:8px}
+.hsub{font-size:12.5px;color:var(--muted)}
+
+/* findings */
+.find{display:grid;gap:26px}
+.find h3{font-size:21px;font-weight:600;margin-bottom:6px}
+.find p{margin:0;color:var(--ink)}
+.find .k{border-left:4px solid var(--accent);padding-left:18px}
+
+/* judge */
+.jcards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.jcards .card{padding:18px}
+.jcards h3{font-size:18px}
+.jcards p{font-size:16px;color:var(--muted);margin:6px 0 12px}
+.pending{display:inline-block;font-family:var(--display);font-size:13px;font-weight:600;background:var(--soft);color:var(--muted);border-radius:6px;padding:2px 9px}
+.toggles{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+.toggles button{border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:7px 14px;font-family:var(--display);font-weight:600;font-size:15px}
+.toggles button[aria-pressed="true"]{border-color:var(--accent);background:var(--soft)}
+.ans{border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:16.5px;background:var(--paper)}
+.ans b{font-family:var(--display);display:block;font-size:13px;color:var(--muted);margin-bottom:2px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.verdict{margin-top:14px;font-family:var(--display);font-size:15px}
+.fair{color:var(--pos);font-weight:600} .biased{color:var(--hate);font-weight:600}
+
+/* cost */
+input[type=range]{width:100%;accent-color:var(--accent);margin:10px 0 4px}
+.big{font-family:var(--display);font-weight:800;font-size:clamp(34px,5vw,52px);letter-spacing:-.03em}
+.costs{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:18px}
+.costs .card{padding:16px}
+.costs .num{font-weight:800;font-size:26px}
+.costs small{display:block;font-family:var(--display);color:var(--muted);font-size:13.5px}
+
+/* checklist */
+.ck{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;padding:0;margin:0;list-style:none}
+.ck li{display:flex;gap:12px;align-items:flex-start;font-size:17px;padding:8px 0;border-bottom:1px solid var(--line)}
+.ck .m{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:13px;border:2px solid var(--line);margin-top:2px}
+.ck .done .m{background:var(--pos);border-color:var(--pos);color:#fff}
+.ck .part .m{border-color:var(--hum);color:var(--hum)}
+.ck small{display:block;font-family:var(--display);color:var(--muted);font-size:13px}
+.prog{font-family:var(--display);font-weight:600;margin-bottom:14px}
+
+footer{padding:36px 0 56px;border-top:1px solid var(--line);font-family:var(--display);font-size:14px;color:var(--muted)}
+
+@media (max-width:880px){
+  .hero,.sec{grid-template-columns:minmax(0,1fr);gap:28px}
+  .hero{padding-top:36px}
+  .grid2,.jcards,.costs,.ck{grid-template-columns:minmax(0,1fr)}
+  .track{grid-template-columns:1fr;gap:18px}
+  .track .st::before{display:none}
+  section{padding:44px 0}
+  .row{grid-template-columns:92px 1fr 74px}
+  .pair{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .bar i,.hbar{transition:none}
+}
+</style>
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <b>The Grader</b>
+  <a href="#how">How it works</a><a href="#data">Golden set</a><a href="#results">Results</a><a href="#found">Findings</a><a href="#judge">Judge</a><a href="#cost">Cost</a><a href="#todo">Checklist</a>
+  <button id="themeBtn" type="button" aria-label="Switch light or dark theme">Theme</button>
+</div></nav>
+
+<main>
+<div class="wrap">
+  <div class="hero">
+    <div>
+      <h1>Can you trust the score of a robot that reads Tunisian Instagram comments?</h1>
+      <p class="lede">Two people labelled every comment. One command tests the robot on all of them. A second model grades the answers, and we try to break it.</p>
+      <div class="chips" id="heroStats"></div>
+      <p class="meta">CS496 AI Engineering, Project 1 &middot; MedTech, Fall 2026</p>
+    </div>
+    <div class="feed" aria-label="Real comments with our label and the robot's answer">
+      <header><span>Real comments from the dataset</span><span id="feedNote"></span></header>
+      <div id="feed"></div>
+    </div>
+  </div>
+</div>
+
+<section id="how"><div class="wrap">
+  <h2 style="font-size:clamp(28px,3.4vw,40px);font-weight:800;margin-bottom:8px">Five steps, one fair test</h2>
+  <p class="muted" style="margin-bottom:28px">The robot is not what we are graded on. The way we measure it is.</p>
+  <div class="track" id="track"></div>
+</div></section>
+
+<section id="data"><div class="wrap sec">
+  <div class="head"><h2>Golden set</h2><p>200 real comments, each labelled twice by two of us without looking at each other's answer. Disagreements were settled into one final label.</p></div>
+  <div class="stack">
+    <div class="grid2">
+      <div class="card">
+        <h3>Do the two labellers agree?</h3>
+        <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+          <svg id="donut" width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="Agreement donut chart"></svg>
+          <div><div class="big" id="agreeBig"></div><div class="muted ui" id="agreeSub"></div></div>
+        </div>
+        <p class="cap" id="kappaNote"></p>
+      </div>
+      <div class="card">
+        <h3>Dev and test split</h3>
+        <div id="splits"></div>
+        <div class="legend" id="splitLegend"></div>
+        <p class="cap">Dev is for improving the prompt. Test is opened once, at the end.</p>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Where the two labellers disagree</h3>
+      <div class="scroll"><div id="labMx"></div></div>
+      <p class="cap" id="labNote"></p>
+    </div>
+  </div>
+</div></section>
+
+<section id="results"><div class="wrap sec">
+  <div class="head"><h2>How well does the robot do?</h2><p>Every item counts. A comment the robot could not answer is scored as wrong, never skipped.</p></div>
+  <div class="stack">
+    <div class="card">
+      <h3>Score by prompt version</h3>
+      <div class="hist" id="hist"></div>
+      <p class="cap">Share of dev comments answered correctly. Dashed slots have no run yet.</p>
+    </div>
+    <div class="card">
+      <div class="tabs" id="tabs" role="group" aria-label="Choose a run"></div>
+      <div id="runBox"></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="found"><div class="wrap sec">
+  <div class="head"><h2>What we found</h2><p>From reading the comments the robot got wrong.</p></div>
+  <div class="find">
+    <div class="k"><h3>Darija in Latin letters is the main blind spot</h3><p>Most of the Hate Speech comments the robot missed are written in Tunisian Darija with Latin letters and numbers. The model does not know the words, so it guesses that they are playful or harmless.</p></div>
+    <div class="k"><h3>"I don't understand it" became "it is harmless"</h3><p>The robot's own reasons often say the meaning is unclear, then pick Humour or Positive. Version 3 adds a short Darija glossary and tells the model never to treat unknown words as harmless.</p></div>
+    <div class="k"><h3>Three labels, on purpose</h3><p>We did not add a separate Criticism label. Hostile or mocking criticism of a person or group is labelled Hate Speech. This keeps labelling simple and is a known limit of the project.</p></div>
+    <div class="k"><h3>One comment always fails</h3><p>POOL0574 gets an empty answer from the model every time, even after retries. It stays in the score as wrong, and goes into the postmortem.</p></div>
+  </div>
+</div></section>
+
+<section id="judge"><div class="wrap sec">
+  <div class="head"><h2>The judge</h2><p>A second model that grades the robot's answers. It is cheaper than people, but only useful if we can show it behaves like them.</p></div>
+  <div class="stack">
+    <div class="jcards">
+      <div class="card"><h3>Agrees with humans?</h3><p>Run the judge on human-labelled items and count how often it gives the same grade.</p><span class="pending" id="j1">Not run yet</span></div>
+      <div class="card"><h3>Position bias</h3><p>Show two answers, then show them again in swapped order. A fair judge keeps the same winner.</p><span class="pending" id="j2">Not run yet</span></div>
+      <div class="card"><h3>Verbosity bias</h3><p>Make an answer longer without making it better. A fair judge does not raise the grade.</p><span class="pending" id="j3">Not run yet</span></div>
+    </div>
+    <div class="card">
+      <h3>See how the two bias tests work</h3>
+      <p class="muted" style="font-size:16px;margin-bottom:0">An illustration with made-up answers, not our measured results.</p>
+      <div class="toggles">
+        <button type="button" id="swapBtn" aria-pressed="false">Swap the order</button>
+        <button type="button" id="padBtn" aria-pressed="false">Pad answer B</button>
+      </div>
+      <div class="pair" id="pair"></div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="cost"><div class="wrap sec">
+  <div class="head"><h2>What it costs</h2><p>Measured from the tokens used in the runs, at Groq's list price for the model.</p></div>
+  <div class="stack">
+    <div class="card" id="costCard"></div>
+  </div>
+</div></section>
+
+<section id="todo"><div class="wrap sec">
+  <div class="head"><h2>Checklist from the brief</h2><p>What has been handed in and what is still open.</p></div>
+  <div class="card"><div class="prog" id="prog"></div><ul class="ck" id="ck"></ul></div>
+</div></section>
+</main>
+
+<footer><div class="wrap" id="foot"></div></footer>
+
+<script>
+const DATA = {"generated": "2026-10-03", "model": "openai/gpt-oss-20b", "price": {"in": 0.075, "out": 0.3, "checked": "Oct 2026"}, "golden": {"total": 200, "agree": 180, "kappa": 0.8482261430468602, "matrix": {"labels": ["Positive", "Humour", "Hate Speech"], "counts": [[77, 6, 2], [1, 51, 7], [0, 4, 52]]}, "dev": {"n": 140, "labels": {"Positive": 59, "Humour": 40, "Hate Speech": 41}}, "test": {"n": 60, "labels": {"Positive": 25, "Humour": 18, "Hate Speech": 17}}}, "runs": [{"id": "classifier_v2_dev", "version": "v2", "split": "dev", "metrics": {"items": 140, "answered": 139, "failed": 1, "failed_ids": ["POOL0574"], "correct": 72, "accuracy_pct": 51.4, "macro_f1": 0.485, "per_label": {"Positive": {"gold_count": 59, "correct": 41, "predicted_count": 65, "precision": 0.631, "recall": 0.695, "f1": 0.661}, "Humour": {"gold_count": 40, "correct": 20, "predicted_count": 58, "precision": 0.345, "recall": 0.5, "f1": 0.408}, "Hate Speech": {"gold_count": 41, "correct": 11, "predicted_count": 16, "precision": 0.688, "recall": 0.268, "f1": 0.386}}, "confusion_matrix": {"Positive": {"Positive": 41, "Humour": 17, "Hate Speech": 1, "FAILED": 0}, "Humour": {"Positive": 15, "Humour": 20, "Hate Speech": 4, "FAILED": 1}, "Hate Speech": {"Positive": 9, "Humour": 21, "Hate Speech": 11, "FAILED": 0}}, "latency_ms": {"mean": 4115.2, "median": 3001.4, "p95": 11133.2}, "tokens": {"prompt": 96248, "completion": 57370, "total": 153618}, "cost_usd": {"this_run": 0.02443, "per_item": 0.0001758, "per_1k_requests": 0.1758, "per_100k_requests_(100x)": 17.58}}}], "examples": [{"id": "POOL0005", "text": "Let him be, it's the dragon of dirge 😭😭", "gold": "Humour", "pred": "Humour"}, {"id": "POOL0017", "text": "Magnifique 😍", "gold": "Positive", "pred": "Positive"}, {"id": "POOL0022", "text": "7a fdhi7ti ya fdhit7tiii sar fia nharetha 😂😂😂", "gold": "Humour", "pred": "Humour"}, {"id": "POOL0002", "text": "Playing Wuthering Waves in the class is a must", "gold": "Humour", "pred": "Positive"}, {"id": "POOL0006", "text": "ماذا يفعلون فالمعبد؟", "gold": "Humour", "pred": "Positive"}, {"id": "POOL0165", "text": "omg us", "gold": "Positive", "pred": "Humour"}, {"id": "POOL0210", "text": "I gave u my highlighter 😩", "gold": "Humour", "pred": "Positive"}], "judge": {}, "checklist": [{"s": "done", "t": "Golden set of 150+ items", "n": "200 comments"}, {"s": "done", "t": "Two labellers per item, agreement reported", "n": "180 of 200, kappa 0.85"}, {"s": "todo", "t": "Labelling guide (about 2 pages)", "n": "data/labelling_guide.md"}, {"s": "done", "t": "Dev and test split", "n": "140 dev, 60 test"}, {"s": "done", "t": "Harness: one command, one row per item"}, {"s": "done", "t": "Structured output (fixed JSON schema)"}, {"s": "part", "t": "Prompts under git with a changelog", "n": "v2 and v3 exist, CHANGELOG.md missing"}, {"s": "todo", "t": "LLM judge with fixed schema"}, {"s": "todo", "t": "Judge reliability: agreement with humans"}, {"s": "todo", "t": "Judge bias: position swap and padding"}, {"s": "todo", "t": "Test set run (once, at the end)"}, {"s": "done", "t": "Cost per 1k requests, today and at 100x"}, {"s": "todo", "t": "README with setup, run and Contributions"}, {"s": "todo", "t": "report.pdf (max 4 pages)"}, {"s": "todo", "t": "postmortem.md"}, {"s": "done", "t": "No API keys in the repo", "n": ".env is ignored by git"}]};
+
+const LAB = ["Positive","Humour","Hate Speech"];
+const CLS = {"Positive":"Positive","Humour":"Humour","Hate Speech":"Hate"};
+const esc = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = (a,b)=> b ? Math.round(1000*a/b)/10 : 0;
+const $ = id => document.getElementById(id);
+const tag = (l,extra="") => `<span class="tag ${l?CLS[l]:"none"}">${l?esc(l):"No answer"}${extra}</span>`;
+
+/* theme */
+(function(){
+  const b=$("themeBtn"), r=document.documentElement;
+  const dark=()=> r.dataset.theme==="dark" || (!r.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const lab=()=> b.textContent = dark() ? "Light mode" : "Dark mode";
+  lab();
+  b.onclick=()=>{ r.dataset.theme = dark() ? "light" : "dark"; lab(); };
+})();
+
+const runs = DATA.runs || [];
+const devRuns = runs.filter(r=>r.split==="dev");
+const latest = devRuns[devRuns.length-1] || runs[runs.length-1];
+
+/* hero */
+(function(){
+  const g=DATA.golden;
+  const chips=[`<span class="stat"><b>${g.total}</b> comments</span>`,`<span class="stat"><b>${pct(g.agree,g.total)}%</b> labeller agreement</span>`];
+  if(latest) chips.push(`<span class="stat"><b>${latest.metrics.correct}/${latest.metrics.items}</b> correct, ${esc(latest.version)} on ${esc(latest.split)}</span>`);
+  $("heroStats").innerHTML=chips.join("");
+  $("feedNote").textContent = latest ? `robot: ${latest.version}` : "";
+  $("feed").innerHTML = (DATA.examples||[]).map(e=>{
+    const ok = e.pred===e.gold;
+    return `<div class="cm"><div class="t">${esc(e.text)}</div>
+      <div class="verd"><small>our label</small>${tag(e.gold)}<small>robot</small>${tag(e.pred)}
+      <span class="res ${ok?"ok":"no"}">${ok?"agree":"disagree"}</span></div></div>`;
+  }).join("");
+})();
+
+/* track */
+(function(){
+  const g=DATA.golden, has=v=>runs.some(r=>r.version===v);
+  const steps=[
+    ["Golden set","200 comments, two labellers",g.total>=150?"done":"part"],
+    ["Harness","One command, one row per comment","done"],
+    ["Prompts","Each change measured on dev", has("v2")&&has("v3")?"done":(has("v2")?"part":"todo")],
+    ["Judge","Grades answers, then we test it", DATA.judge&&DATA.judge.done?"done":"todo"],
+    ["Cost","Tokens, price, 100x volume", latest?"done":"todo"],
+  ];
+  const txt={done:"Done",part:"In progress",todo:"Next"};
+  $("track").innerHTML=steps.map((s,i)=>`<div class="st ${s[2]}"><div class="dot">${i+1}</div><h4>${s[0]}</h4><p>${s[1]}</p><span class="badge">${txt[s[2]]}</span></div>`).join("");
+})();
+
+/* golden set */
+(function(){
+  const g=DATA.golden;
+  $("agreeBig").textContent=`${g.agree} of ${g.total}`;
+  $("agreeSub").textContent=`${pct(g.agree,g.total)}% same label`;
+  $("kappaNote").textContent=`${g.total-g.agree} items differed. Cohen's kappa is ${g.kappa.toFixed(2)}, which corrects for agreement by chance.`;
+  const R=52,C=2*Math.PI*R, a=C*g.agree/g.total;
+  $("donut").innerHTML=`<circle cx="65" cy="65" r="${R}" fill="none" stroke="var(--soft)" stroke-width="16"/>
+    <circle cx="65" cy="65" r="${R}" fill="none" stroke="var(--accent)" stroke-width="16" stroke-dasharray="${a} ${C-a}" transform="rotate(-90 65 65)" stroke-linecap="butt"/>
+    <text x="65" y="72" text-anchor="middle" font-family="var(--display)" font-weight="800" font-size="24" fill="var(--ink)">${Math.round(100*g.agree/g.total)}%</text>`;
+  $("splits").innerHTML=["dev","test"].map(s=>{
+    const d=g[s], tot=d.n;
+    return `<div style="margin:12px 0"><div class="ui" style="display:flex;justify-content:space-between;font-size:15px"><b>${s}</b><span>${tot} comments</span></div>
+      <div class="bar" style="margin-top:6px">${LAB.map(l=>`<i class="${CLS[l]}" data-w="${pct(d.labels[l]||0,tot)}" title="${l}: ${d.labels[l]||0}"></i>`).join("")}</div>
+      <div class="ui muted" style="font-size:13px;margin-top:4px">${LAB.map(l=>`${l} ${d.labels[l]||0}`).join(" &middot; ")}</div></div>`;
+  }).join("");
+  $("splitLegend").innerHTML=[["Positive","--pos"],["Humour","--hum"],["Hate Speech","--hate"]].map(x=>`<span style="--c:var(${x[1]})">${x[0]}</span>`).join("");
+  const m=g.matrix, max=Math.max(...m.counts.flat());
+  let t=`<p class="axis">rows: labeller 1 &middot; columns: labeller 2</p><table class="mx"><tr><th></th>${m.labels.map(l=>`<th>${l}</th>`).join("")}</tr>`;
+  m.counts.forEach((row,i)=>{
+    t+=`<tr><th class="r">${m.labels[i]}</th>`+row.map((v,j)=>{
+      const diag=i===j, k=Math.round(18+70*v/max);
+      const bg=diag?`color-mix(in srgb,var(--accent) ${k}%,var(--surface))`:(v?`color-mix(in srgb,var(--hate) ${Math.min(80,25+v*7)}%,var(--surface))`:"var(--soft)");
+      return `<td><div class="cell" style="background:${bg};${diag&&k>55?"color:#fff":""}">${v}</div></td>`;
+    }).join("")+"</tr>";
+  });
+  $("labMx").innerHTML=t+"</table>";
+  const off=[];
+  for(let i=0;i<3;i++)for(let j=i+1;j<3;j++){off.push([m.labels[i],m.labels[j],m.counts[i][j]+m.counts[j][i]]);}
+  off.sort((a,b)=>b[2]-a[2]);
+  $("labNote").textContent=`The diagonal is agreement. Most disagreements are ${off[0][0]} vs ${off[0][1]} (${off[0][2]} items), then ${off[1][0]} vs ${off[1][1]} (${off[1][2]}).`;
+})();
+
+/* history */
+(function(){
+  const slots=["v1","v2","v3","test"];
+  $("hist").innerHTML=slots.map(s=>{
+    const r = s==="test" ? runs.find(x=>x.split==="test") : devRuns.find(x=>x.version===s);
+    const sub = s==="test" ? "final run only" : "dev set";
+    if(!r) return `<div class="hcol"><div class="hbar empty">no run yet</div><div class="hlab">${s==="test"?"Test":s}</div><div class="hsub">${sub}</div></div>`;
+    const a=r.metrics.accuracy_pct;
+    return `<div class="hcol"><div class="hbar" data-h="${a*0.74}">${a}%</div><div class="hlab">${s==="test"?"Test ("+r.version+")":s}</div><div class="hsub">${r.metrics.correct}/${r.metrics.items} correct</div></div>`;
+  }).join("");
+})();
+
+/* run box */
+let cur = runs.indexOf(latest);
+function matrixHTML(m){
+  const cols=LAB.concat(["FAILED"]);
+  const max=Math.max(...LAB.flatMap(g=>cols.map(c=>m.confusion_matrix[g][c])));
+  let t=`<p class="axis">rows: our label &middot; columns: robot's answer</p><div class="scroll"><table class="mx"><tr><th></th>${cols.map(c=>`<th>${c==="FAILED"?"No answer":c}</th>`).join("")}</tr>`;
+  LAB.forEach(g=>{
+    t+=`<tr><th class="r">${g}</th>`+cols.map(c=>{
+      const v=m.confusion_matrix[g][c], diag=g===c;
+      const k=Math.round(15+75*v/max);
+      const bg = v===0 ? "var(--soft)" : diag ? `color-mix(in srgb,var(--accent) ${k}%,var(--surface))` : `color-mix(in srgb,var(--hate) ${Math.min(75,18+k*.6)}%,var(--surface))`;
+      return `<td><button type="button" class="cell" data-g="${g}" data-c="${c}" data-v="${v}" style="background:${bg};${diag&&k>55?"color:#fff":""}">${v}</button></td>`;
+    }).join("")+"</tr>";
+  });
+  return t+`</table></div><div class="read ui" id="read">Click a cell to read it.</div>`;
+}
+function renderRun(){
+  const r=runs[cur]; if(!r){ $("runBox").innerHTML='<p class="muted">No runs yet. Run the scorer to create one.</p>'; return; }
+  const m=r.metrics;
+  $("tabs").innerHTML=runs.map((x,i)=>`<button type="button" data-i="${i}" aria-pressed="${i===cur}">${esc(x.version)} on ${esc(x.split)}</button>`).join("");
+  $("tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{cur=+b.dataset.i;renderRun();});
+  const lat=m.latency_ms;
+  $("runBox").innerHTML=`
+    <div class="runlay">
+      <div>
+        <h3>${esc(r.version)} on ${esc(r.split)}: ${m.correct} of ${m.items} correct</h3>
+        <div class="bar" style="margin:10px 0 4px"><i class="acc" data-w="${m.accuracy_pct}"></i></div>
+        <div class="ui muted" style="font-size:14px">${m.accuracy_pct}% correct &middot; macro-F1 ${m.macro_f1} &middot; ${m.failed} failed${m.failed_ids.length?" ("+m.failed_ids.map(esc).join(", ")+")":""}</div>
+        <h3 style="margin-top:24px">Recall per label</h3>
+        <p class="muted" style="font-size:15px;margin:0 0 4px">Of all comments with this label, how many did the robot find?</p>
+        ${LAB.map(l=>{const p=m.per_label[l];return `<div class="row"><span>${l}</span><div class="bar"><i class="${CLS[l]}" data-w="${pct(p.correct,p.gold_count)}"></i></div><span class="v">${p.correct}/${p.gold_count} &middot; ${pct(p.correct,p.gold_count)}%</span></div>`}).join("")}
+        <div class="ui muted" style="font-size:13.5px;margin-top:14px">Latency per comment: median ${Math.round(lat.median).toLocaleString()} ms, slowest 5% over ${Math.round(lat.p95).toLocaleString()} ms (includes retry waits).</div>
+      </div>
+      <div>
+        <h3>What it answers when it is wrong</h3>
+        ${matrixHTML(m)}
+      </div>
+    </div>`;
+  requestAnimationFrame(()=>requestAnimationFrame(grow));
+  $("runBox").querySelectorAll(".cell").forEach(c=>c.onclick=()=>{
+    $("runBox").querySelectorAll(".cell").forEach(x=>x.classList.remove("sel")); c.classList.add("sel");
+    const v=+c.dataset.v, g=c.dataset.g, p=c.dataset.c, tot=m.per_label[g].gold_count;
+    $("read").innerHTML = p==="FAILED" ? `<b>${v}</b> of ${tot} ${g} comments got no answer from the model.`
+      : g===p ? `<b>${v}</b> of ${tot} ${g} comments were found correctly.`
+      : `<b>${v}</b> of ${tot} ${g} comments were called <b>${p}</b> by the robot.`;
+  });
+}
+function grow(){
+  document.querySelectorAll("[data-w]").forEach(e=>e.style.width=e.dataset.w+"%");
+  document.querySelectorAll("[data-h]").forEach(e=>e.style.height=e.dataset.h+"%");
+}
+renderRun();
+
+/* judge illustration */
+(function(){
+  let swap=false, pad=false;
+  const A="The robot says Humour: it is a joke with a laughing emoji.";
+  const B0="The robot says Humour: playful pun and crying-laughing emojis.";
+  const B1=B0+" This is because the comment, when we read it carefully and consider the overall tone, the wording and the emojis used together, shows a clear playful intention overall.";
+  function draw(){
+    const B=pad?B1:B0;
+    const first=swap?["B",B]:["A",A], second=swap?["A",A]:["B",B];
+    $("pair").innerHTML=[first,second].map((x,i)=>`<div class="ans"><b>Shown ${i===0?"first":"second"}: answer ${x[0]}</b>${esc(x[1])}</div>`).join("");
+    let v=[];
+    v.push(swap?`Order swapped. A fair judge still prefers the same answer as before. <span class="fair">Same verdict = no position bias.</span> <span class="biased">Different verdict = position bias.</span>`:`Normal order. The judge picks the better answer.`);
+    if(pad) v.push(`Answer B is longer but says nothing new. A fair judge keeps B's grade. <span class="fair">Same grade = no verbosity bias.</span> <span class="biased">Higher grade = verbosity bias.</span>`);
+    $("verdict").innerHTML=v.join("<br>");
+    $("swapBtn").setAttribute("aria-pressed",swap); $("padBtn").setAttribute("aria-pressed",pad);
+  }
+  $("swapBtn").onclick=()=>{swap=!swap;draw()}; $("padBtn").onclick=()=>{pad=!pad;draw()};
+  draw();
+  const J=DATA.judge||{};
+  if(J.agreement) {$("j1").textContent=J.agreement; $("j1").style.color="var(--pos)";}
+  if(J.position) {$("j2").textContent=J.position; $("j2").style.color="var(--pos)";}
+  if(J.verbosity) {$("j3").textContent=J.verbosity; $("j3").style.color="var(--pos)";}
+})();
+
+/* cost */
+(function(){
+  if(!latest){ $("costCard").innerHTML='<p class="muted">No run yet.</p>'; return; }
+  const m=latest.metrics, c=m.cost_usd, n=m.answered||1;
+  const pi=Math.round(m.tokens.prompt/n), po=Math.round(m.tokens.completion/n);
+  $("costCard").innerHTML=`
+    <h3>How many comments per month?</h3>
+    <input type="range" id="vol" min="0" max="100" value="33" aria-label="Comments per month">
+    <div class="ui muted" id="volLab"></div>
+    <div class="big" id="volCost" style="margin-top:6px"></div>
+    <div class="costs">
+      <div class="card"><small>this run (${m.items} comments)</small><span class="num">$${c.this_run.toFixed(3)}</span></div>
+      <div class="card"><small>per 1,000 comments</small><span class="num">$${c.per_1k_requests.toFixed(2)}</span></div>
+      <div class="card"><small>per 100,000 comments (100x)</small><span class="num">$${c["per_100k_requests_(100x)"].toFixed(2)}</span></div>
+    </div>
+    <p class="cap">About ${pi.toLocaleString()} prompt tokens and ${po.toLocaleString()} completion tokens per comment, measured on ${esc(latest.version)}. Price used: $${DATA.price.in} per 1M input tokens and $${DATA.price.out} per 1M output tokens (${esc(DATA.model)} on Groq, checked ${esc(DATA.price.checked)}). Prices change.</p>`;
+  const f=()=>{ const N=Math.round(Math.pow(10,3+3*$("vol").value/100)/100)*100;
+    $("volLab").textContent=`${N.toLocaleString()} comments per month`;
+    $("volCost").textContent="$"+(c.per_item*N).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+" per month"; };
+  $("vol").oninput=f; f();
+})();
+
+/* checklist */
+(function(){
+  const L=DATA.checklist||[]; const done=L.filter(x=>x.s==="done").length;
+  $("prog").textContent=`${done} of ${L.length} done`;
+  $("ck").innerHTML=L.map(x=>`<li class="${x.s}"><span class="m">${x.s==="done"?"&#10003;":x.s==="part"?"&bull;":""}</span><span>${esc(x.t)}${x.n?`<small>${esc(x.n)}</small>`:""}</span></li>`).join("");
+})();
+
+$("foot").innerHTML=`Model ${esc(DATA.model)} on Groq &middot; page generated ${esc(DATA.generated)} from results/metrics_*.json`;
+requestAnimationFrame(()=>requestAnimationFrame(grow));
+</script>
+</body>
+</html>
