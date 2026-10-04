@@ -1,0 +1,63 @@
+You are classifying Instagram comments from a real Instagram comment dataset. Many comments are written in Tunisian Arabic (Darija), either in Arabic script or in Latin letters with numbers (for example 3 = ع, 7 = ح, 9 = ق), mixed with French and English.
+
+Classify each comment into exactly one of these categories:
+
+Positive
+The comment clearly expresses appreciation, praise, affection, support, encouragement, admiration, agreement, or another genuinely positive reaction.
+
+Humour
+The main purpose of the comment is playful or funny. This includes jokes, playful teasing, irony, absurd or exaggerated statements, mock-serious statements, and clearly playful reactions.
+
+Hate Speech
+The comment is primarily insulting, degrading, offensive, hostile, or hateful toward a person or group. This includes:
+- profanity and vulgar insults (including sexual insults and insults to someone's mother or family)
+- religious insults (for example calling someone ungodly)
+- calling people stupid, liars, or fake
+- mocking, resentful or hostile attacks on a group, for example rich students, people showing off wealth or cars, or people called materialistic
+
+There is no separate "criticism" label. Hostile, negative or mocking criticism of a person or group counts as Hate Speech, even if it is not a classic insult.
+
+Tunisian Darija vocabulary (Latin letters or Arabic script):
+- zeb, zby, zab, azebi = dick (vulgar insult)
+- nik omk = f*** your mother; nik rohy = f*** me/myself (strong profanity)
+- kroz = vulgar word, often used to mean "rich people" in a hostile way
+- kofar / kofr = ungodly, disbeliever (insult)
+- ri99, tracha9, ta7an = vulgar insults
+- yahchi fih, tihchi fih, ta7chi fih, يحشيو فيه = they are lying / making things up
+- خنانة = snot/boogers (insulting)
+- wtf = what the f***
+
+Important classification rules:
+
+1. Positive is NOT the default category.
+Do not choose Positive simply because the comment is not obviously hateful. The comment must contain a genuinely positive reaction, such as praise, appreciation, affection, support, encouragement, or admiration.
+
+2. Do not assume a comment is harmless because you do not understand it.
+If it contains Darija, slang or vulgar words, use the vocabulary above. If a word is vulgar or insulting, the comment is probably Hate Speech even if it is short and has a laughing emoji.
+
+3. Humour is about the main purpose of the comment.
+A comment can be short and still be humorous. Look for joking, playful wording, exaggeration, irony, teasing, absurdity, or a deliberately funny statement. Short sad or neutral comments with no joke and no praise are not automatically Humour or Positive.
+
+4. Do not assume that emojis automatically mean Humour.
+Laughing or reaction emojis can accompany Positive comments or Hate Speech. Interpret emojis together with the words.
+
+5. Distinguish playful teasing from hostility.
+If the comment is mainly playful or joking, use Humour.
+If the main purpose is insulting, degrading, mocking or attacking someone, use Hate Speech.
+
+6. Do not invent context.
+Use only information contained in the comment. If a joke would only be understandable from the video and the comment gives no indication of humour, do not invent a humorous interpretation.
+
+7. When several categories seem possible, choose the category corresponding to the main communicative purpose of the comment.
+
+8. Mentions such as @username do not determine the category by themselves. Classify the actual message surrounding the mention.
+
+Return JSON only in this format:
+
+{
+  "label": "Positive | Humour | Hate Speech",
+  "reason": "short explanation"
+}
+
+Comment:
+{{COMMENT}}

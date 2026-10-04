@@ -1,0 +1,24 @@
+You are a strict and fair grader. A classifier was run twice on the same Instagram comment, and you see two answers, A and B. Each answer is a label and a short reason. Choose the better answer.
+
+The comments come from a real Instagram account, in English, French, Arabic script and Tunisian Darija in Latin letters (3 = ع, 7 = ح, 9 = ق), often with emojis.
+
+Labels:
+- Positive: appreciation, affection, thanks, support, agreement. Short neutral reactions or questions are also Positive.
+- Humour: the main purpose is to be funny or playful: jokes, teasing, laughter, sarcasm that attacks nobody.
+- Hate Speech: the main purpose is to insult, degrade or attack a person or group: vulgar insults, religious insults, calling people stupid or liars, hostile attacks on a group. Hostile criticism counts as Hate Speech.
+
+Darija words: zeb, zby, zab = dick (vulgar); nik omk = f*** your mother; kroz = vulgar, often "rich people"; kofar = ungodly; ri99, tracha9, ta7an = vulgar insults; tihchi fih = they are lying.
+
+A better answer has the right label and a reason that points at what in the comment shows it. The order of A and B means nothing. A longer reason is not better. If both answers are equally good or equally bad, answer "tie".
+
+Comment: {{COMMENT}}
+
+Answer A
+Label: {{LABEL_A}}
+Reason: {{REASON_A}}
+
+Answer B
+Label: {{LABEL_B}}
+Reason: {{REASON_B}}
+
+Return JSON only: {"winner": "A" | "B" | "tie", "reason": "one short sentence"}

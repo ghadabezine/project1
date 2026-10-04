@@ -43,7 +43,23 @@ CHECKLIST = [
     {"s": "done", "t": "No API keys in the repo", "n": ".env is ignored by git"},
 ]
 
-JUDGE = {}  # later: {"done": True, "agreement": "84%", "position": "6 of 40 changed", "verbosity": "..."}
+
+
+def load_judge(res):
+    """Fill the judge cards from results/judge_*_summary.json (made by harness/judge.py)."""
+    def read(name):
+        p = res / f"judge_{name}_summary.json"
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    a, p, v = read("agreement"), read("position"), read("verbosity")
+    out = {}
+    if a:
+        out["agreement"] = f"{a['agree']}/{a['n']} same grade ({a['pct']}%), kappa {a['kappa']}"
+    if p:
+        out["position"] = f"{p['flipped']} of {p['pairs']} verdicts changed when swapped"
+    if v:
+        out["verbosity"] = f"grade went up for {v['up']} of {v['n']} padded answers"
+    out["done"] = bool(a and p and v)
+    return out
 
 
 def golden():
@@ -104,7 +120,7 @@ def main():
                                  "gold": d["gold_label"], "pred": d["predicted_label"]})
 
     data = {"generated": datetime.date.today().isoformat(), "model": MODEL, "price": PRICE,
-            "golden": golden(), "runs": runs, "examples": examples, "judge": JUDGE, "checklist": CHECKLIST}
+            "golden": golden(), "runs": runs, "examples": examples, "judge": load_judge(res), "checklist": CHECKLIST}
     html = (BASE / "dashboard" / "template.html").read_text(encoding="utf-8")
     html = html.replace("__DATA__", json.dumps(data, ensure_ascii=False))
     out = Path(args.out)
