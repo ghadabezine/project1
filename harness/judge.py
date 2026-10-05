@@ -1,8 +1,10 @@
 """LLM judge and its reliability tests.
 
 Steps (from the repo root):
-  python harness/judge.py sample                 # 1. makes data/judge_sample.csv for the humans to grade
+  python harness/judge.py sample                 # 1. makes data/judge_sample.xlsx (with dropdowns) for the humans to grade
   (the humans fill grade_1, grade_2, final_grade with good / partly / bad)
+  python harness/judge.py repair                 # (if Arabic/emoji turned into '?') restores the text, keeps the grades
+  python harness/judge.py prefill                # (optional) writes 'bad' where the robot's label is wrong
   python harness/judge.py grade --delay 8        # 2. the judge grades the same items
   python harness/judge.py agreement              # 3. judge vs humans
   python harness/judge.py position --delay 8     # 4. position bias: swap the order of two answers
@@ -30,7 +32,9 @@ from schema import GRADES, JUDGE_SCHEMA, PAIRWISE_SCHEMA  # noqa: E402
 
 BASE = Path(__file__).resolve().parent.parent
 RES = BASE / "results"
-SAMPLE = BASE / "data" / "judge_sample.csv"
+SAMPLE = BASE / "data" / "judge_sample.xlsx"
+SAMPLE_CSV = BASE / "data" / "judge_sample.csv"  # old format, still readable
+SAMPLE_COLS = ["item_id", "comment_text", "gold_label", "robot_label", "robot_reason", "grade_1", "grade_2", "final_grade"]
 SYSTEM = "You are a careful, fair grader. Return only a json object."
 # Padding adds length but no information. Used for the verbosity test.
 FILLER = ("To explain this in more detail: reading the comment carefully and considering its overall tone, "
@@ -135,9 +139,35 @@ def write_summary(name, data):
 
 
 # ---------------------------------------------------------------- 1. sample
+def write_sample(rows):
+    """Write the sheet for the humans as .xlsx, with a good/partly/bad dropdown on the three grade columns."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.worksheet.datavalidation import DataValidation
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "judge_sample"
+    ws.append(SAMPLE_COLS)
+    for r in rows:
+        ws.append([r.get(c, "") for c in SAMPLE_COLS])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for col, w in zip("ABCDEFGH", [11, 48, 13, 13, 70, 11, 11, 12]):
+        ws.column_dimensions[col].width = w
+    for row in ws.iter_rows(min_row=2, max_col=5):
+        for c in row:
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.freeze_panes = "A2"
+    dv = DataValidation(type="list", formula1='"good,partly,bad"', allow_blank=True)
+    dv.error = "Use good, partly or bad"
+    ws.add_data_validation(dv)
+    dv.add(f"F2:H{len(rows) + 1}")
+    wb.save(SAMPLE)
+
+
 def cmd_sample(a):
-    if SAMPLE.exists() and not a.force:
-        sys.exit(f"{SAMPLE} already exists (humans may have filled it). Use --force to overwrite.")
+    if (SAMPLE.exists() or SAMPLE_CSV.exists()) and not a.force:
+        sys.exit("A judge sample already exists (humans may have filled it). Use --force to overwrite.")
     run = [r for r in load_run(a.run_b).values() if r.get("error") is None and r.get("predicted_label")]
     wrong = [r for r in run if r["predicted_label"] != r["gold_label"]]
     right = [r for r in run if r["predicted_label"] == r["gold_label"]]
@@ -147,22 +177,101 @@ def cmd_sample(a):
     pick += rng.sample(right, min(a.n - len(pick), len(right)))
     rng.shuffle(pick)
     SAMPLE.parent.mkdir(exist_ok=True)
-    with open(SAMPLE, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f)
-        w.writerow(["item_id", "comment_text", "gold_label", "robot_label", "robot_reason",
-                    "grade_1", "grade_2", "final_grade"])
-        for r in pick:
-            w.writerow([r["item_id"], r["comment_text"], r["gold_label"], r["predicted_label"], r["reason"], "", "", ""])
+    write_sample([{"item_id": r["item_id"], "comment_text": r["comment_text"], "gold_label": r["gold_label"],
+                   "robot_label": r["predicted_label"], "robot_reason": r["reason"]} for r in pick])
     print(f"Saved: {SAMPLE} ({len(pick)} items: {sum(r in wrong for r in pick)} with a wrong label, "
           f"{sum(r in right for r in pick)} with a right label)")
     print("Humans: fill grade_1 and grade_2 alone (good / partly / bad). A third person fills final_grade where they differ.")
 
 
+def cmd_convert(a):
+    """Turn an existing data/judge_sample.csv (with grades already in it) into data/judge_sample.xlsx."""
+    if not SAMPLE_CSV.exists():
+        sys.exit("No data/judge_sample.csv to convert.")
+    if SAMPLE.exists() and not a.force:
+        sys.exit("data/judge_sample.xlsx already exists. Use --force to overwrite it.")
+    with open(SAMPLE_CSV, newline="", encoding="utf-8-sig") as f:
+        sample = f.read()
+    import io
+    first = sample.splitlines()[0] if sample else ""
+    delim = ";" if first.count(";") > first.count(",") else ","
+    rows = list(csv.DictReader(io.StringIO(sample), delimiter=delim))
+    write_sample(rows)
+    print(f"Saved: {SAMPLE} ({len(rows)} rows, grades kept)")
+
+
 def read_sample():
+    """Rows of the human sheet: from .xlsx if it exists, else from the old .csv."""
+    if SAMPLE.exists():
+        from openpyxl import load_workbook
+        ws = load_workbook(SAMPLE, read_only=True, data_only=True).active
+        it = ws.iter_rows(values_only=True)
+        head = [str(h).strip() if h is not None else "" for h in next(it)]
+        return [{h: ("" if v is None else str(v)) for h, v in zip(head, row)} for row in it if row and row[0]]
+    if SAMPLE_CSV.exists():
+        with open(SAMPLE_CSV, newline="", encoding="utf-8-sig") as f:
+            first = f.readline()
+            f.seek(0)
+            return list(csv.DictReader(f, delimiter=";" if first.count(";") > first.count(",") else ","))
+    sys.exit("Run 'sample' first.")
+
+
+def cmd_prefill(a):
+    """Write 'bad' in the grade columns of every row where the robot's label differs from the gold label.
+    By our labelling guide a wrong label is always 'bad', so this saves the humans 20 rows. Empty cells only."""
+    from openpyxl import load_workbook
     if not SAMPLE.exists():
-        sys.exit("Run 'sample' first.")
-    with open(SAMPLE, newline="", encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+        sys.exit("data/judge_sample.xlsx not found. Run 'convert' or 'sample' first.")
+    wb = load_workbook(SAMPLE)
+    ws = wb.active
+    head = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    cols = ["grade_1", "grade_2"] if a.column == "both" else [a.column]
+    filled = 0
+    for row in range(2, ws.max_row + 1):
+        gold, robot = ws.cell(row, head["gold_label"]).value, ws.cell(row, head["robot_label"]).value
+        if gold is None or gold == robot:
+            continue
+        for c in cols:
+            cell = ws.cell(row, head[c])
+            if cell.value in (None, ""):
+                cell.value = "bad"
+                filled += 1
+    wb.save(SAMPLE)
+    print(f"Wrote 'bad' in {filled} empty cell(s) of {', '.join(cols)} where the robot's label is wrong.")
+    print("The humans only need to grade the rows where the robot's label is right.")
+
+
+def cmd_repair(a):
+    """Restore the text columns of data/judge_sample.xlsx from the results file (item_id match).
+    Use it when WPS/Excel replaced Arabic letters and emojis by '?'. The grades are not touched."""
+    from openpyxl import load_workbook
+    from openpyxl.worksheet.datavalidation import DataValidation
+    if not SAMPLE.exists():
+        sys.exit("data/judge_sample.xlsx not found.")
+    run = load_run(a.run_b)
+    wb = load_workbook(SAMPLE)
+    ws = wb.active
+    head = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    fixed = missing = 0
+    for row in range(2, ws.max_row + 1):
+        item = ws.cell(row, head["item_id"]).value
+        if not item:
+            continue
+        src = run.get(str(item).strip())
+        if not src:
+            missing += 1
+            continue
+        for col, key in [("comment_text", "comment_text"), ("gold_label", "gold_label"),
+                         ("robot_label", "predicted_label"), ("robot_reason", "reason")]:
+            if col in head and ws.cell(row, head[col]).value != src[key]:
+                ws.cell(row, head[col]).value = src[key]
+                fixed += 1
+    if not ws.data_validations.dataValidation:  # put the dropdown back if the save removed it
+        dv = DataValidation(type="list", formula1='"good,partly,bad"', allow_blank=True)
+        ws.add_data_validation(dv)
+        dv.add(f"F2:H{ws.max_row}")
+    wb.save(SAMPLE)
+    print(f"Restored {fixed} text cell(s) from {Path(a.run_b).name}. Items not found in the results file: {missing}.")
 
 
 # ---------------------------------------------------------------- 2. grade
@@ -186,33 +295,57 @@ def cmd_grade(a):
 def cmd_agreement(a):
     sample = read_sample()
     judged = load_jsonl(RES / "judge_grades.jsonl")
-    hum, jud, skipped = [], [], 0
+    hum, jud, skipped, right_label = [], [], 0, []
     for r in sample:
         g1, g2, fin = norm_grade(r["grade_1"]), norm_grade(r["grade_2"]), norm_grade(r["final_grade"])
-        final = fin or (g1 if g1 and g1 == g2 else None)
+        # final_grade wins; else both graders agree; else a single grader's grade (if only one column is filled)
+        final = fin or (g1 if g1 and g1 == g2 else None) or (g1 if g1 and not g2 else None) or (g2 if g2 and not g1 else None)
         if not final or r["item_id"] not in judged:
             skipped += 1
             continue
         hum.append(final)
         jud.append(judged[r["item_id"]]["grade"])
+        right_label.append(r["gold_label"] == r["robot_label"])
     if not hum:
-        sys.exit("No human grades found yet. Fill data/judge_sample.csv and run 'grade' first.")
+        sys.exit("No usable pairs yet. Needs human grades in data/judge_sample.xlsx AND the judge's grades "
+                 "(run 'grade' first). Humans filled: "
+                 f"{sum(1 for r in sample if norm_grade(r['final_grade']) or norm_grade(r['grade_1']))} rows; "
+                 f"judge graded: {len(judged)} rows.")
     agree = sum(h == j for h, j in zip(hum, jud))
     kappa = cohen_kappa_score(hum, jud) if len(set(hum + jud)) > 1 else 1.0
     conf = {h: {j: sum(1 for x, y in zip(hum, jud) if x == h and y == j) for j in GRADES} for h in GRADES}
     out = {"n": len(hum), "agree": agree, "pct": pct(agree, len(hum)), "kappa": round(kappa, 3),
            "skipped": skipped, "confusion_human_rows_judge_cols": conf}
-    pairs = [(norm_grade(r["grade_1"]), norm_grade(r["grade_2"])) for r in sample]
-    pairs = [(x, y) for x, y in pairs if x and y]
+    # Rows with a wrong robot label are 'bad' by the labelling guide, so they are easy.
+    # The real test of the judge is the rows where the robot's label is right (good / partly / bad).
+    sub = [(h, j) for h, j, rl in zip(hum, jud, right_label) if rl]
+    if sub:
+        sa = sum(h == j for h, j in sub)
+        hs, js = [h for h, _ in sub], [j for _, j in sub]
+        sk = cohen_kappa_score(hs, js) if len(set(hs + js)) > 1 else 1.0
+        out["right_label_rows"] = {"n": len(sub), "agree": sa, "pct": pct(sa, len(sub)), "kappa": round(sk, 3)}
+    pairs = [(norm_grade(r["grade_1"]), norm_grade(r["grade_2"]), r["gold_label"] == r["robot_label"]) for r in sample]
+    pairs = [p for p in pairs if p[0] and p[1]]
     if pairs:
-        ha = sum(x == y for x, y in pairs)
+        ha = sum(x == y for x, y, _ in pairs)
         out["humans_vs_humans"] = {"n": len(pairs), "agree": ha, "pct": pct(ha, len(pairs))}
+        rp = [(x, y) for x, y, rl in pairs if rl]
+        if rp:
+            out["humans_vs_humans_right_label_rows"] = {"n": len(rp), "agree": sum(x == y for x, y in rp),
+                                                        "pct": pct(sum(x == y for x, y in rp), len(rp))}
     print(f"Judge vs humans: {agree}/{len(hum)} same grade ({out['pct']}%), kappa {out['kappa']}. Skipped: {skipped}")
-    print(f"{'human \\ judge':<16}" + "".join(f"{g:>8}" for g in GRADES))
+    corner = "human \\ judge"
+    print(f"{corner:<16}" + "".join(f"{g:>8}" for g in GRADES))
     for h in GRADES:
         print(f"{h:<16}" + "".join(f"{conf[h][g]:>8}" for g in GRADES))
+    if "right_label_rows" in out:
+        r = out["right_label_rows"]
+        print(f"Only rows where the robot's label is right: {r['agree']}/{r['n']} same grade ({r['pct']}%), kappa {r['kappa']}")
     if "humans_vs_humans" in out:
         print(f"Humans vs humans: {out['humans_vs_humans']['agree']}/{out['humans_vs_humans']['n']} ({out['humans_vs_humans']['pct']}%)")
+    if "humans_vs_humans_right_label_rows" in out:
+        r = out["humans_vs_humans_right_label_rows"]
+        print(f"Humans vs humans, right-label rows only: {r['agree']}/{r['n']} ({r['pct']}%)")
     write_summary("agreement", out)
 
 
@@ -303,7 +436,7 @@ def cmd_verbosity(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("sample", cmd_sample), ("grade", cmd_grade), ("agreement", cmd_agreement),
+    for name, fn in [("sample", cmd_sample), ("convert", cmd_convert), ("prefill", cmd_prefill), ("repair", cmd_repair), ("grade", cmd_grade), ("agreement", cmd_agreement),
                      ("position", cmd_position), ("verbosity", cmd_verbosity)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
@@ -314,6 +447,7 @@ def main():
         p.add_argument("--delay", type=float, default=8.0)
         p.add_argument("--dry-run", action="store_true")
         p.add_argument("--force", action="store_true")
+        p.add_argument("--column", default="both", choices=["both", "grade_1", "grade_2"], help="for prefill")
     args = ap.parse_args()
     RES.mkdir(exist_ok=True)
     args.fn(args)

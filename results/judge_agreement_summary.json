@@ -1,0 +1,40 @@
+{
+  "n": 39,
+  "agree": 18,
+  "pct": 46.2,
+  "kappa": 0.145,
+  "skipped": 1,
+  "confusion_human_rows_judge_cols": {
+    "good": {
+      "good": 13,
+      "partly": 0,
+      "bad": 0
+    },
+    "partly": {
+      "good": 3,
+      "partly": 0,
+      "bad": 2
+    },
+    "bad": {
+      "good": 16,
+      "partly": 0,
+      "bad": 5
+    }
+  },
+  "right_label_rows": {
+    "n": 20,
+    "agree": 13,
+    "pct": 65.0,
+    "kappa": 0.136
+  },
+  "humans_vs_humans": {
+    "n": 40,
+    "agree": 35,
+    "pct": 87.5
+  },
+  "humans_vs_humans_right_label_rows": {
+    "n": 20,
+    "agree": 15,
+    "pct": 75.0
+  }
+}
