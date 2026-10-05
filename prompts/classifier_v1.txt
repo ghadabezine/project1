@@ -1,0 +1,144 @@
+You are classifying Instagram comments from a manually labeled dataset.
+
+Your task is to classify each comment into exactly one of these three categories:
+
+- Positive
+- Humour
+- Hate Speech
+
+
+The comments may contain:
+- English
+- French
+- Arabic
+- Tunisian Arabic
+- Arabizi
+- emojis
+- usernames (@user)
+- slang and informal expressions
+
+Classify based on the intended tone and purpose of the comment, not only individual words.
+
+
+## Category definitions
+
+
+### Positive
+
+Choose Positive when the comment is mainly friendly, supportive, appreciative, affectionate, or shows approval.
+
+This includes:
+- compliments
+- encouragement
+- admiration
+- friendly reactions
+- positive opinions
+- supportive replies
+- affectionate expressions
+- positive emojis combined with a positive message
+
+A comment can be short and still be Positive if the intention is clearly friendly.
+
+Examples of signals:
+- appreciation
+- congratulations
+- agreement
+- showing excitement
+- friendly interaction
+
+
+### Humour
+
+Choose Humour when the main purpose of the comment is to make fun, joke, tease, exaggerate, or create a playful reaction.
+
+This includes:
+- jokes
+- playful teasing
+- irony
+- sarcasm used for entertainment
+- exaggerated statements
+- funny comparisons
+- laughing expressions when they represent a joke
+
+Important:
+A comment containing emojis such as 😂🤣 does not automatically mean Humour.
+Decide whether the main intention is entertainment or simply expressing emotion.
+
+If a comment is both positive and funny:
+- choose Humour if the joke is the main purpose
+- choose Positive if the main purpose is appreciation
+
+
+### Hate Speech
+
+In this dataset, Hate Speech refers to hostile or offensive comments.
+
+Choose Hate Speech when the comment contains:
+- direct insults
+- degrading language
+- aggressive attacks
+- strong contempt toward someone
+- vulgar expressions used to attack
+- hostile mocking
+- offensive personal criticism
+
+Important:
+Do not classify normal disagreement or criticism as Hate Speech.
+
+The comment should contain a clear hostile or attacking intention.
+
+
+## Important classification rules
+
+1. Consider the complete meaning of the comment.
+Do not classify based only on one word.
+
+2. Emojis modify the meaning but do not determine the label alone.
+
+3. Profanity does not automatically mean Hate Speech.
+Profanity used in a playful joke may be Humour.
+Profanity used to attack someone is Hate Speech.
+
+4. Sarcasm depends on intention:
+- playful sarcasm → Humour
+- friendly teasing → Positive or Humour
+- aggressive sarcasm → Hate Speech
+
+5. Short comments:
+- laughter or playful expressions → usually Humour
+- compliments or supportive reactions → Positive
+- insults or attacks → Hate Speech
+
+6. For Arabic/Tunisian/Arabizi comments:
+Focus on the intended tone:
+- affection/support → Positive
+- joking/teasing → Humour
+- insulting/aggressive → Hate Speech
+
+
+## Decision process
+
+Ask these questions in order:
+
+1. Is the comment mainly attacking, insulting, or degrading someone?
+→ Hate Speech
+
+2. If not, is the main purpose joking, teasing, exaggerating, or being funny?
+→ Humour
+
+3. Otherwise:
+→ Positive
+
+
+Return only valid JSON.
+
+Format:
+
+{
+  "label": "Positive | Humour | Hate Speech",
+  "reason": "Short explanation of why this label matches the comment."
+}
+
+
+Comment:
+{{COMMENT}}
