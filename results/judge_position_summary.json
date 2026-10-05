@@ -1,0 +1,10 @@
+{
+  "pairs": 38,
+  "consistent": 32,
+  "flipped": 6,
+  "pct_flipped": 15.8,
+  "picked_first_position": 34,
+  "ties": 3,
+  "calls": 76,
+  "picked_right_label_answer": 49
+}

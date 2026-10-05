@@ -426,13 +426,13 @@ function matrixHTML(m){
 function renderRun(){
   const r=runs[cur]; if(!r){ $("runBox").innerHTML='<p class="muted">No runs yet. Run the scorer to create one.</p>'; return; }
   const m=r.metrics;
-  $("tabs").innerHTML=runs.map((x,i)=>`<button type="button" data-i="${i}" aria-pressed="${i===cur}">${esc(x.version)} on ${esc(x.split)}</button>`).join("");
+  $("tabs").innerHTML=runs.map((x,i)=>`<button type="button" data-i="${i}" aria-pressed="${i===cur}">${esc(x.version)} on ${esc(x.split)}${x.note?" ("+esc(x.note)+")":""}</button>`).join("");
   $("tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{cur=+b.dataset.i;renderRun();});
   const lat=m.latency_ms;
   $("runBox").innerHTML=`
     <div class="runlay">
       <div>
-        <h3>${esc(r.version)} on ${esc(r.split)}: ${m.correct} of ${m.items} correct</h3>
+        <h3>${esc(r.version)} on ${esc(r.split)}: ${m.correct} of ${m.items} correct</h3>${r.note?`<p class="muted ui" style="font-size:14px;margin:4px 0 0">${esc(r.note)}</p>`:""}
         <div class="bar" style="margin:10px 0 4px"><i class="acc" data-w="${m.accuracy_pct}"></i></div>
         <div class="ui muted" style="font-size:14px">${m.accuracy_pct}% correct &middot; macro-F1 ${m.macro_f1} &middot; ${m.failed} failed${m.failed_ids.length?" ("+m.failed_ids.map(esc).join(", ")+")":""}</div>
         <h3 style="margin-top:24px">Recall per label</h3>

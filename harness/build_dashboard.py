@@ -27,14 +27,14 @@ EXAMPLE_IDS = ["POOL0005", "POOL0017", "POOL0022", "POOL0002", "POOL0006", "POOL
 CHECKLIST = [
     {"s": "done", "t": "Golden set of 150+ items", "n": "200 comments"},
     {"s": "done", "t": "Two labellers per item, agreement reported", "n": "180 of 200, kappa 0.85"},
-    {"s": "todo", "t": "Labelling guide (about 2 pages)", "n": "data/labelling_guide.md"},
+    {"s": "part", "t": "Labelling guide (about 2 pages)", "n": "draft in data/labelling_guide.md, rules to confirm"},
     {"s": "done", "t": "Dev and test split", "n": "140 dev, 60 test"},
     {"s": "done", "t": "Harness: one command, one row per item"},
     {"s": "done", "t": "Structured output (fixed JSON schema)"},
-    {"s": "part", "t": "Prompts under git with a changelog", "n": "v2 and v3 exist, CHANGELOG.md missing"},
-    {"s": "todo", "t": "LLM judge with fixed schema"},
-    {"s": "todo", "t": "Judge reliability: agreement with humans"},
-    {"s": "todo", "t": "Judge bias: position swap and padding"},
+    {"s": "done", "t": "Prompts under git with a changelog", "n": "prompts/CHANGELOG.md"},
+    {"s": "done", "t": "LLM judge with fixed schema", "n": "judge_v1, grade and reason"},
+    {"s": "done", "t": "Judge reliability: agreement with humans", "n": "18/39, kappa 0.15"},
+    {"s": "done", "t": "Judge bias: position swap and padding", "n": "6/38 flipped, 0/39 went up"},
     {"s": "todo", "t": "Test set run (once, at the end)"},
     {"s": "done", "t": "Cost per 1k requests, today and at 100x"},
     {"s": "todo", "t": "README with setup, run and Contributions"},
@@ -98,10 +98,11 @@ def main():
         name = p.stem.replace("metrics_", "")
         if name.endswith("_dryrun"):
             continue
-        m = re.search(r"_(v\d+)_(dev|test)$", name)
+        m = re.search(r"_(v\d+)_(dev|test)(_earlier_run)?$", name)
         if not m:
             continue
         runs.append({"id": name, "version": m.group(1), "split": m.group(2),
+                     "note": "earlier run, prompt lost" if m.group(3) else "",
                      "metrics": json.loads(p.read_text(encoding="utf-8"))})
     runs.sort(key=lambda r: (r["split"] == "test", int(r["version"][1:])))
 
